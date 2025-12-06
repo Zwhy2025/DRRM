@@ -1,0 +1,34 @@
+services:
+  vodp_project:
+    image: vodp:base
+    build: .
+    container_name: vodp_container
+    privileged: true
+    working_dir: /root/workspace/vodp
+    environment:
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - NVIDIA_VISIBLE_DEVICES=all
+      - ACCEPT_EULA=Y
+      - PRIVACY_CONSENT=Y
+      - DISPLAY=${DISPLAY}
+      - QT_X11_NO_MITSHM=1
+      - container=docker
+    volumes:
+      - ~/workspace/:/root/workspace
+      - /mnt/manip-asset:/mnt/manip-asset
+      - "~/.Xauthority:/root/.Xauthority"
+      - /tmp:/tmp
+      - /dev:/dev
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    tmpfs:
+      - /run
+      - /run/lock
+    network_mode: host
+    runtime: nvidia
+    shm_size: "32gb"
+    ulimits:
+      memlock: -1
+    tty: true
+    stdin_open: true
+    gpus: all
+    ipc: host
