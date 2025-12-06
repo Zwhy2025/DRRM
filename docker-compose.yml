@@ -1,6 +1,6 @@
 services:
   vodp_project:
-    image: vodp:base
+    image: vodp:latest
     build: .
     container_name: vodp_container
     privileged: true
@@ -15,7 +15,7 @@ services:
       - container=docker
     volumes:
       - ~/workspace/:/root/workspace
-      - /mnt/manip-asset:/mnt/manip-asset
+      - /mnt:/mnt
       - "~/.Xauthority:/root/.Xauthority"
       - /tmp:/tmp
       - /dev:/dev
