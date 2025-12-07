@@ -6,7 +6,7 @@ pip install h5py loguru
 ```
 # (不行版本不兼容) 
 pip install -U huggingface_hub
-# 使用特定版本
+# 使用特定版本 这个默认已经安装过了
 pip install huggingface-hub-0.36.0
 ```
 

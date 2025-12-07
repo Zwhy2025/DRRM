@@ -55,7 +55,26 @@ class LinearNormalizer(DictOfTensorMixin):
         if isinstance(x, dict):
             result = dict()
             for key, value in x.items():
-                params = self.params_dict[key]
+                # Handle keys with dots (e.g., 'observation.state')
+                # After load_state_dict, keys with dots are stored as nested ParameterDict
+                # e.g., 'observation.state' -> params_dict['observation']['state']
+                if '.' in key:
+                    # Navigate nested structure
+                    parts = key.split('.')
+                    params = self.params_dict
+                    for part in parts:
+                        try:
+                            params = params[part]
+                        except (AttributeError, KeyError):
+                            # Try dict conversion as fallback
+                            params = dict(params)[part]
+                else:
+                    # Simple key without dots
+                    try:
+                        params = self.params_dict[key]
+                    except AttributeError:
+                        # Fallback: convert to dict to access
+                        params = dict(self.params_dict)[key]
                 result[key] = _normalize(value, params, forward=forward)
             return result
         else:

@@ -78,7 +78,8 @@ class VODPEncoder(ModuleAttrMixin):
         features.append(agent_pos)
         
         # concatenate all features
-        result = torch.cat(features, dim=-1)  # 512 * 2 + 14 = 1038
+        #result = torch.cat(features, dim=-1)  # 512 * 2 + 14 = 1038
+        result = torch.cat(features, dim=-1)  # emvis_feat + state
         return result
     
     def output_shape(self):

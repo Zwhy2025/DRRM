@@ -47,6 +47,11 @@ mkdir -p datasets
 
 访问 https://huggingface.co/datasets/D-Robotics/DRRM 下载数据集并放置在 `datasets/` 目录下。
 
+如需使用自有数据训练，请参阅 `[自定义数据训练指引](docs/custom_training.zh.md)`。
+预置数据示例训练指南：
+- `kuavo_task1_1-200`: `docs/training_kuavo_task1_1-200.md`
+- `ur12e/real_libero_spatial`: `docs/training_ur12e.md`
+
 ## 📑 训练
 1. 根据你的训练环境修改加速配置文件：[configs/accelerate_config.yaml](configs/accelerate_config.yaml)
 2. 在训练脚本 [scripts/train_demo.sh](scripts/train_demo.sh) 中指定以下参数：
