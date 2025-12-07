@@ -93,7 +93,8 @@ def resize_dataset(input_dir, output_dir, target_height=240, target_width=320):
         return False
     
     # Copy other meta files
-    meta_files = ['tasks.jsonl', 'stats.json', 'episodes.jsonl']
+    # todo 自动添加其他meta文件
+    meta_files = ['tasks.jsonl', 'stats.json', 'episodes.jsonl', 'episodes_stats.jsonl']
     for meta_file in meta_files:
         src = input_path / 'meta' / meta_file
         dst = output_path / 'meta' / meta_file

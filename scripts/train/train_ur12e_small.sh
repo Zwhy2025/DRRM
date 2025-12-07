@@ -17,8 +17,8 @@ fi
 
 dataset=datasets/ur12e_small
 task='real_libero_spatial'
-demo=50                 # 或设为整数限制样本数
-config_dir=configs/vodp_train/vodp_ur12e.yaml
+demo=100                 # 或设为整数限制样本数
+config_dir=configs/vodp_train/vodp_ur12e_small.yaml
 
 accelerate launch \
   --config_file configs/accelerate_config.yaml \

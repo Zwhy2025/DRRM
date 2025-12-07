@@ -1,7 +1,6 @@
 defaults:
   - vodp_base
   - _self_
-  # UR12e real libero spatial: two RGB streams + 7-DoF state/action
 n_obs_steps: 1
 
 shape_meta:
@@ -18,12 +17,13 @@ shape_meta:
   action:
     shape: [7]
 
-image_shape: [3, 480, 640] 
+image_shape: [3, 240, 320]
 
-output_dir: "checkpoints/vodp_ur12e_${train_dataset.demo}"
+output_dir: "checkpoints/vodp_ur12e_small_${train_dataset.demo}"
 mixed_precision: "bf16"
-train_batch_size: 16  # 
-gradient_accumulation_steps: 1  # 减少累积步数，加快更新频率 以时间换空间
+train_batch_size: 128
+gradient_accumulation_steps: 1
+checkpointing_period: 10000
 
 model:
   obs_encoder:
@@ -56,4 +56,3 @@ model:
         conv_num: 3
       mv_fuser_config: {}
   out_channels: 1031
-

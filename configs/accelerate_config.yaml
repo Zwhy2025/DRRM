@@ -12,3 +12,99 @@ tpu_use_cluster: false
 tpu_use_sudo: false
 use_cpu: false
 main_process_port: 0
+
+# # 单卡生成
+# compute_environment: LOCAL_MACHINE
+# debug: false
+# distributed_type: 'NO'
+# downcast_bf16: 'no'
+# dynamo_config:
+#   dynamo_backend: INDUCTOR
+#   dynamo_mode: default
+#   dynamo_use_dynamic: true
+#   dynamo_use_fullgraph: true
+#   dynamo_use_regional_compilation: true
+# enable_cpu_affinity: true
+# gpu_ids: '0'
+# machine_rank: 0
+# main_training_function: main
+# mixed_precision: bf16
+# num_machines: 1
+# num_processes: 1
+# rdzv_backend: static
+# same_network: true
+# tpu_env: []
+# tpu_use_cluster: false
+# tpu_use_sudo: false
+# use_cpu: false
+
+
+
+# 多卡生成
+# compute_environment: LOCAL_MACHINE
+# debug: true
+# distributed_type: FSDP
+# downcast_bf16: 'no'
+# dynamo_config:
+#   dynamo_backend: INDUCTOR
+#   dynamo_mode: default
+#   dynamo_use_dynamic: true
+#   dynamo_use_fullgraph: true
+#   dynamo_use_regional_compilation: true
+# enable_cpu_affinity: false
+# fsdp_config:
+#   fsdp_activation_checkpointing: true
+#   fsdp_auto_wrap_policy: TRANSFORMER_BASED_WRAP
+#   fsdp_cpu_ram_efficient_loading: true
+#   fsdp_offload_params: true
+#   fsdp_reshard_after_forward: true
+#   fsdp_state_dict_type: SHARDED_STATE_DICT
+#   fsdp_version: 2
+# machine_rank: 0
+# main_training_function: main
+# mixed_precision: bf16
+# num_machines: 1
+# num_processes: 2
+# rdzv_backend: static
+# same_network: true
+# tpu_env: []
+# tpu_use_cluster: false
+# tpu_use_sudo: false
+# use_cpu: false
+
+
+
+
+
+# 仅仅注释
+
+# # 计算环境类型：LOCAL_MACHINE(本地机器) / AMAZON_ECS / AZURE
+# compute_environment: LOCAL_MACHINE
+
+# # 分布式训练类型：NO(单GPU) / MULTI_GPU(多GPU单机) / MULTI_CPU / DEEPSPEED / FSDP
+# # distributed_type: NO
+# distributed_type: MULTI_GPU
+
+# # 是否将bf16降级为fp16（兼容性选项）：'yes' / 'no'
+# downcast_bf16: 'no'
+
+# # 使用的GPU ID，逗号分隔，如 "0" 或 "0,1" 或 "0,2"（跳过GPU 1）
+# gpu_ids: "0,1"
+
+# # 启动的进程数，通常等于GPU数量。单GPU=1，双GPU=2
+# num_processes: 2
+
+# # 混合精度训练：'no' / 'fp16' / 'bf16'（实际在训练配置文件中设置，此处可注释）
+# # mixed_precision: 'no'
+
+# # 机器数量：1(单机) / 2+ (多机训练)
+# num_machines: 1
+
+# rdzv_backend: static
+# same_network: false
+# tpu_env: []
+# tpu_use_cluster: false
+# tpu_use_sudo: false
+# use_cpu: false  
+# main_process_port: 0
+
