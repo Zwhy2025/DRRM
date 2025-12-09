@@ -1,23 +1,18 @@
 import sys
-import torch  
+import torch
 import os
 import numpy as np
-import hydra
 from pathlib import Path
-from collections import deque
-import traceback
 from copy import deepcopy
 import yaml
-from datetime import datetime
 import importlib
 import argparse
 from omegaconf import OmegaConf
-from safetensors.torch import load_model
-from transformers import AutoConfig, AutoModel
 import time
 import multiprocessing as mp
 from multiprocessing import Manager, Process, Queue
-from drrm.common.pytorch_util import dict_apply
+
+from vodp_inference import VODPInference
 
 # allows arbitrary python code execution in configs using the ${eval:''} resolver
 OmegaConf.register_new_resolver("eval", eval, replace=True)
@@ -25,11 +20,13 @@ OmegaConf.register_new_resolver("eval", eval, replace=True)
 current_file_path = os.path.abspath(__file__)
 parent_directory = os.path.dirname(current_file_path)
 
+
 def format_result(key: int, res: dict):
     s = f"【{key:03d}】"
-    for k in  ['seed', 'success', 'frames', 'time', 'fps', 'infer_cnt', 'infer_time', 'ips', 'start', 'end', 'count', 'limit', 'pid', 'device']:
-        if not k in res: continue
-        elif k == 'time' or k == 'infer_time': 
+    for k in ['seed', 'success', 'frames', 'time', 'fps', 'infer_cnt', 'infer_time', 'ips', 'start', 'end', 'count', 'limit', 'pid', 'device']:
+        if not k in res:
+            continue
+        elif k == 'time' or k == 'infer_time':
             s += f"{k}: {int(res[k]):03d} s, "
         elif k in ['start', 'end']:
             timestamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(res[k]))
@@ -39,7 +36,7 @@ def format_result(key: int, res: dict):
         elif k == 'success':
             if res[k]:
                 result = 'Success'
-            elif res[k]==None:
+            elif res[k] == None:
                 result = 'None   '
             else:
                 result = 'Fail   '
@@ -48,158 +45,22 @@ def format_result(key: int, res: dict):
             s += f"{k}: {res[k]}, "
     return s
 
+
 def log_result(file_path, ind: int, res: dict, lock):
     with lock:
         with open(file_path, 'r', newline='') as f:
             lines = f.readlines()
         if ind >= len(lines):
-            lines += ['\n']*(ind+1-len(lines))
+            lines += ['\n'] * (ind + 1 - len(lines))
         string = format_result(ind, res)
         lines[ind] = string + '\n'
         with open(file_path, 'w', newline='') as f:
             f.writelines(lines)
 
-def load_policy(ckp_path, use_ckp_code = True):
-    if use_ckp_code:
-        policy_model = AutoModel.from_pretrained(ckp_path, trust_remote_code=True)
-        # load state dict of normalizer
-        load_model(policy_model, os.path.join(ckp_path, "model.safetensors"), strict=False)
-    else:
-        # get package path from checkpoint config
-        config = AutoConfig.from_pretrained(ckp_path, trust_remote_code=True) 
-        ConfigClass = hydra.utils.get_class(config.pkg_map['AutoConfig'])
-        PolicyClass = hydra.utils.get_class(config.pkg_map['AutoModel'])
-        # reload config by packege class
-        config = ConfigClass.from_pretrained(ckp_path)
-        policy_model = PolicyClass(config)
-        # load state dict of normalizer
-        load_model(policy_model, os.path.join(ckp_path, "model.safetensors"), strict=False)
-    return policy_model
-
-class VODPRunner:
-    def __init__(self,
-                 output_dir,
-                 eval_episodes=20,
-                 max_steps=300,
-                 n_obs_steps=3,
-                 n_action_steps=8,
-                 fps=10,
-                 crf=22,
-                 tqdm_interval_sec=5.0,
-                 task_name=None,
-    ):
-        self.task_name = task_name
-        self.eval_episodes = eval_episodes
-        self.fps = fps
-        self.crf = crf
-        self.n_obs_steps = n_obs_steps
-        self.n_action_steps = n_action_steps
-        self.max_steps = max_steps
-        self.tqdm_interval_sec = tqdm_interval_sec
-
-        self.obs = deque(maxlen=n_obs_steps+1)
-        self.env = None
-
-    def stack_last_n_obs(self, all_obs, n_steps):
-        assert(len(all_obs) > 0)
-        all_obs = list(all_obs)
-        if isinstance(all_obs[0], np.ndarray):
-            result = np.zeros((n_steps,) + all_obs[-1].shape, 
-                dtype=all_obs[-1].dtype)
-            start_idx = -min(n_steps, len(all_obs))
-            result[start_idx:] = np.array(all_obs[start_idx:])
-            if n_steps > len(all_obs):
-                # pad
-                result[:start_idx] = result[start_idx]
-        elif isinstance(all_obs[0], torch.Tensor):
-            result = torch.zeros((n_steps,) + all_obs[-1].shape, 
-                dtype=all_obs[-1].dtype)
-            start_idx = -min(n_steps, len(all_obs))
-            result[start_idx:] = torch.stack(all_obs[start_idx:])
-            if n_steps > len(all_obs):
-                # pad
-                result[:start_idx] = result[start_idx]
-        else:
-            raise RuntimeError(f'Unsupported obs type {type(all_obs[0])}')
-        return result
-    
-    def reset_obs(self):
-        self.obs.clear()
-
-    def update_obs(self, current_obs):
-        self.obs.append(current_obs)
-
-    def get_n_steps_obs(self):
-        assert(len(self.obs) > 0), 'no observation is recorded, please update obs first'
-
-        result = dict()
-        for key in self.obs[0].keys():
-            result[key] = self.stack_last_n_obs(
-                [obs[key] for obs in self.obs],
-                self.n_obs_steps
-            )
-
-        return result
-
-    def get_action(self, policy, observaton=None):
-        device, dtype = policy.device, policy.dtype
-        if observaton is not None:
-            self.obs.append(observaton) # update
-        obs = self.get_n_steps_obs()
-
-        # create obs dict
-        np_obs_dict = dict(obs)
-        # device transfer
-        obs_dict = dict_apply(np_obs_dict, lambda x: torch.from_numpy(x).to(device=device))
-        # run policy
-        with torch.no_grad():
-            obs_dict_input = {k: v.unsqueeze(0) for k, v in obs_dict.items()}
-            
-            action_dict = policy.predict_action(obs_dict_input)
-
-        # device_transfer
-        np_action_dict = dict_apply(action_dict, lambda x: x.detach().to('cpu').float().numpy())
-        action = np_action_dict['action'].squeeze(0)
-        return action
-
-class VODP:
-    def __init__(self, cfg: OmegaConf):
-
-        dtype = cfg.mixed_precision
-        if dtype == 'bf16':
-            self.dtype = torch.bfloat16
-        elif dtype == 'fp16':
-            self.dtype = torch.float16
-        else:
-            self.dtype = torch.float32
-        # TODO change load mode
-        # self.policy = hydra.utils.instantiate(model_cfg.model)
-        # load_model(self.policy, os.path.join(cfg.checkpoint_dir, "model.safetensors"), strict=False)    # TODO: strict=False
-        self.policy = load_policy(cfg.checkpoint_dir, use_ckp_code=False)
-        self.policy.eval()
-        self.policy.to('cuda')
-
-        self.runner = VODPRunner(output_dir=None, n_obs_steps=self.policy.n_obs_steps)
-
-    def update_obs(self, observation):
-        self.runner.update_obs(observation)
-    
-    def get_action(self, observation=None):
-        device = str(self.policy.device)
-        if self.dtype == torch.float32:
-            action = self.runner.get_action(self.policy, observation)
-        else:
-            with torch.autocast(device_type=device, dtype=self.dtype):
-                action = self.runner.get_action(self.policy, observation)
-        return action
-
-    def get_last_obs(self):
-        return self.runner.obs[-1]
-
 def test_policy_worker(task_name, args_copy, seed, need, lock, test_num, log_path, log_lock, result_queue, gpu_id = None):
     if gpu_id != None: os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
     Demo_class_copy = class_decorator(task_name)
-    dp_copy = VODP(args_copy)
+    dp_copy = VODPInference.from_config(args_copy)
     expert_check = True
     Demo_class_copy.suc = 0
     # Demo_class_copy.test_num = test_num_list_sub[0]
@@ -246,7 +107,7 @@ def test_policy_worker(task_name, args_copy, seed, need, lock, test_num, log_pat
             Demo_class_copy.close()
             if Demo_class_copy.render_freq:
                 Demo_class_copy.viewer.close()
-            dp_copy.runner.reset_obs()
+            dp_copy.reset()
             t1 = time.time()
             delta = t1 - t0
             result.update(

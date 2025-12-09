@@ -10,7 +10,23 @@ from pathlib import Path
 import argparse
 import subprocess
 import sys
+import multiprocessing
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from tqdm import tqdm
+from PIL import Image
+
+
+def resize_image(input_image, output_image, target_height, target_width):
+    """Resize image using PIL"""
+    output_image.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        img = Image.open(input_image)
+        resized = img.resize((target_width, target_height), Image.Resampling.LANCZOS)
+        resized.save(output_image)
+        return True
+    except Exception as e:
+        print(f"Error resizing {input_image}: {e}")
+        return False
 
 
 def resize_videos_with_ffmpeg(input_video, output_video, target_height, target_width):
@@ -43,9 +59,9 @@ def update_info_json(info_path, output_path, new_height, new_width):
     # Update image/video feature dimensions
     for key, feature in info['features'].items():
         if feature['dtype'] in ['image', 'video']:
-            # Update shape [H, W, C] -> [new_H, new_W, C]
-            feature['shape'][0] = new_height
-            feature['shape'][1] = new_width
+            # Update shape [C, H, W] -> [C, new_H, new_W]
+            feature['shape'][1] = new_height
+            feature['shape'][2] = new_width
             
             # Update video info if present
             if 'info' in feature:
@@ -112,26 +128,54 @@ def resize_dataset(input_dir, output_dir, target_height=240, target_width=320):
         shutil.copytree(data_input, data_output)
         print(f"Copied data directory")
     
+    # Resize images (multi-process)
+    images_input = input_path / 'images'
+    images_output = output_path / 'images'
+    
+    if images_input.exists():
+        exts = ['.png', '.jpg', '.jpeg']
+        image_files = []
+        for ext in exts:
+            image_files.extend(images_input.rglob(f'*{ext}'))
+            image_files.extend(images_input.rglob(f'*{ext.upper()}'))
+        
+        print(f"Found {len(image_files)} images to resize")
+        
+        success_count = 0
+        with ProcessPoolExecutor(max_workers=resize_dataset.workers) as executor:
+            futures = {}
+            for image_file in image_files:
+                relative_path = image_file.relative_to(images_input)
+                output_image = images_output / relative_path
+                futures[executor.submit(resize_image, image_file, output_image, target_height, target_width)] = image_file
+            
+            for future in tqdm(as_completed(futures), total=len(futures), desc="Resizing images"):
+                if future.result():
+                    success_count += 1
+        
+        print(f"Successfully resized {success_count}/{len(image_files)} images")
+    else:
+        print("No images directory found")
+    
     # Resize videos
     videos_input = input_path / 'videos'
     videos_output = output_path / 'videos'
     
     if videos_input.exists():
-        # Find all video files
         video_files = list(videos_input.rglob('*.mp4'))
         print(f"Found {len(video_files)} videos to resize")
         
-        # Resize each video
         success_count = 0
-        for video_file in tqdm(video_files, desc="Resizing videos"):
-            # Preserve directory structure
-            relative_path = video_file.relative_to(videos_input)
-            output_video = videos_output / relative_path
+        with ProcessPoolExecutor(max_workers=resize_dataset.workers) as executor:
+            futures = {}
+            for video_file in video_files:
+                relative_path = video_file.relative_to(videos_input)
+                output_video = videos_output / relative_path
+                futures[executor.submit(resize_videos_with_ffmpeg, video_file, output_video, target_height, target_width)] = video_file
             
-            if resize_videos_with_ffmpeg(video_file, output_video, target_height, target_width):
-                success_count += 1
-            else:
-                print(f"Failed to resize {video_file}")
+            for future in tqdm(as_completed(futures), total=len(futures), desc="Resizing videos"):
+                if future.result():
+                    success_count += 1
         
         print(f"Successfully resized {success_count}/{len(video_files)} videos")
     else:
@@ -142,12 +186,16 @@ def resize_dataset(input_dir, output_dir, target_height=240, target_width=320):
     return True
 
 
+resize_dataset.workers = multiprocessing.cpu_count()
+
+
 def main():
     parser = argparse.ArgumentParser(description='Resize dataset images/videos')
     parser.add_argument('input_dir', type=str, help='Input dataset directory')
     parser.add_argument('output_dir', type=str, help='Output dataset directory')
     parser.add_argument('--height', type=int, default=240, help='Target height (default: 240)')
     parser.add_argument('--width', type=int, default=320, help='Target width (default: 320)')
+    parser.add_argument('--workers', type=int, default=16, help='Parallel workers for images')
     
     args = parser.parse_args()
     
@@ -160,6 +208,7 @@ def main():
         print("  macOS: brew install ffmpeg")
         sys.exit(1)
     
+    resize_dataset.workers = max(1, args.workers)
     success = resize_dataset(args.input_dir, args.output_dir, args.height, args.width)
     sys.exit(0 if success else 1)
 
