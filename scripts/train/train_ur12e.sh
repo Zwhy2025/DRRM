@@ -15,7 +15,7 @@ if [ "${CONDA_DEFAULT_ENV:-}" != "drrm" ]; then
   conda activate drrm
 fi
 
-dataset=datasets/ur12e
+dataset=/fastStore/datasets/ur12e
 task='real_libero_spatial'
 demo=100                 # 或设为整数限制样本数
 config_dir=configs/vodp_train/vodp_ur12e.yaml

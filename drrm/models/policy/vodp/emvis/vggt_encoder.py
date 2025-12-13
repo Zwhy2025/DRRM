@@ -7,7 +7,7 @@ import torch
 from vggt.models.aggregator import Aggregator, slice_expand_and_flatten
 
 logger = logging.getLogger(__name__)
-_URL = "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
+_URL = "https://hf-mirror.com/facebook/VGGT-1B/resolve/main/model.pt"
 AA_pattern = r'(?:global_blocks|frame_blocks)\.(\d+)\.'
 
 class VGGTEncoder(Aggregator):
