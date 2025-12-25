@@ -9,7 +9,7 @@ shape_meta:
     observation.images.image:
       shape: ${image_shape}
       type: rgb
-    observation.images.wrist_image:
+    observation.images.wrist_right_image:
       shape: ${image_shape}
       type: rgb
     observation.state:
@@ -22,13 +22,13 @@ image_shape: [3, 480, 640]
 
 output_dir: "checkpoints/vodp_ur12e_${train_dataset.demo}"
 mixed_precision: "bf16"
-train_batch_size: 16  # 
+train_batch_size: 48  # 
 gradient_accumulation_steps: 1  # 减少累积步数，加快更新频率 以时间换空间
 
 model:
   obs_encoder:
     out_channels: 526
-    rgb_key: ['observation.images.image', 'observation.images.wrist_image']
+    rgb_key: ['observation.images.image', 'observation.images.wrist_right_image']
     state_key: 'observation.state'
     emvis_config:
       dim_2d: null

@@ -12,7 +12,7 @@ from vggt.heads.track_head import TrackHead
 from .layers import DPTHead
 
 logger = logging.getLogger(__name__)
-_URL = "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
+_URL = "https://hf-mirror.com/facebook/VGGT-1B/resolve/main/model.pt"
 HEADS = ['camera_head', 'point_head', 'depth_head', 'track_head']
 
 class VGGTHead(nn.Module, PyTorchModelHubMixin):

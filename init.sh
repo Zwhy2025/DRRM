@@ -148,7 +148,7 @@ main() {
   ensure_conda_env
   install_base_project
   install_vggt
-  install_robotwin_deps
+  # install_robotwin_deps
   run pip install h5py loguru
   log "完成 ✅"
 }
