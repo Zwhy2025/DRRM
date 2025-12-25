@@ -1,4 +1,5 @@
 from typing import Dict
+import time
 import hydra
 import torch
 import torch.nn as nn
@@ -142,32 +143,65 @@ class VODP(BasePolicy, PreTrainedModel, ModuleAttrMixin):
         model = self.model
         scheduler = self.noise_scheduler
 
+        total_start = time.time()
+        
+        # 初始化轨迹
+        init_start = time.time()
         trajectory = torch.randn(
             size=condition_data.shape, 
             dtype=condition_data.dtype,
             device=condition_data.device,
             generator=generator)
+        print(f"[TIMING] conditional_sample.init_trajectory: {(time.time() - init_start) * 1000:.2f}ms")
     
         # set step values
         scheduler.set_timesteps(self.num_inference_steps)
+        num_steps = len(scheduler.timesteps)
+        print(f"[TIMING] conditional_sample.num_steps: {num_steps}")
 
-        for t in scheduler.timesteps:
+        # 扩散采样循环
+        diffusion_start = time.time()
+        model_time = 0.0
+        scheduler_time = 0.0
+        conditioning_time = 0.0
+        
+        for i, t in enumerate(scheduler.timesteps):
             # 1. apply conditioning
+            cond_start = time.time()
             trajectory[condition_mask] = condition_data[condition_mask]
+            conditioning_time += time.time() - cond_start
 
-            # 2. predict model output
+            # 2. predict model output (GPU运算)
+            model_start = time.time()
+            if i == 0:
+                # 第一次推理可能包含CUDA初始化，单独计时
+                torch.cuda.synchronize() if condition_data.device.type == 'cuda' else None
             model_output = model(trajectory, t, 
                 local_cond=local_cond, global_cond=global_cond)
+            if condition_data.device.type == 'cuda':
+                torch.cuda.synchronize()  # 确保GPU计算完成
+            model_time += time.time() - model_start
 
             # 3. compute previous image: x_t -> x_t-1
+            scheduler_start = time.time()
             trajectory = scheduler.step(
                 model_output, t, trajectory, 
                 generator=generator,
                 **kwargs
                 ).prev_sample
+            scheduler_time += time.time() - scheduler_start
+        
+        diffusion_time = time.time() - diffusion_start
+        print(f"[TIMING] conditional_sample.diffusion_loop_total: {diffusion_time * 1000:.2f}ms")
+        print(f"[TIMING] conditional_sample.model_forward (GPU): {model_time * 1000:.2f}ms ({model_time/diffusion_time*100:.1f}%)")
+        print(f"[TIMING] conditional_sample.scheduler_step: {scheduler_time * 1000:.2f}ms ({scheduler_time/diffusion_time*100:.1f}%)")
+        print(f"[TIMING] conditional_sample.conditioning: {conditioning_time * 1000:.2f}ms ({conditioning_time/diffusion_time*100:.1f}%)")
         
         # finally make sure conditioning is enforced
-        trajectory[condition_mask] = condition_data[condition_mask]        
+        trajectory[condition_mask] = condition_data[condition_mask]
+        
+        total_time = time.time() - total_start
+        print(f"[TIMING] conditional_sample.total: {total_time * 1000:.2f}ms")
 
         return trajectory
 
@@ -177,11 +211,41 @@ class VODP(BasePolicy, PreTrainedModel, ModuleAttrMixin):
         obs_dict: must include "obs" key
         result: must include "action" key
         """
+        total_start = time.time()
+        
         assert 'past_action' not in obs_dict # not implemented yet
+        
         # normalize input
+        normalize_start = time.time()
+        def key_matches(key, params_dict):
+            """检查键是否在 normalizer 的参数字典中（支持点分隔键）"""
+            if key in params_dict:
+                return True
+            # 对于点分隔键，检查前缀是否在 params_dict 中
+            if '.' in key:
+                prefix = key.split('.')[0]
+                return prefix in params_dict
+            return False
+        
         filtered_obs_dict = {key: value for key, value in obs_dict.items() 
-                if key in self.normalizer.params_dict}
+                if key_matches(key, self.normalizer.params_dict)}
+        
+        if len(filtered_obs_dict) == 0:
+            obs_keys = list(obs_dict.keys())
+            normalizer_keys = list(self.normalizer.params_dict.keys())
+            raise ValueError(
+                f"No matching observation keys found. "
+                f"Input keys: {obs_keys}, "
+                f"Normalizer expects keys starting with: {normalizer_keys}. "
+                f"Please check the key mapping."
+            )
+        
         nobs = self.normalizer.normalize(filtered_obs_dict)
+        print(f"[TIMING] predict_action.normalize: {(time.time() - normalize_start) * 1000:.2f}ms")
+        
+        if len(nobs) == 0:
+            raise ValueError("Normalized observation dictionary is empty after normalization")
+        
         value = next(iter(nobs.values()))
         B, To = value.shape[:2]
         T = self.horizon
@@ -194,12 +258,22 @@ class VODP(BasePolicy, PreTrainedModel, ModuleAttrMixin):
         dtype = self.dtype
 
         # handle different ways of passing observation
+        obs_encode_start = time.time()
         local_cond = None
         global_cond = None
         if self.obs_as_global_cond:
             # condition through global feature
             this_nobs = dict_apply(nobs, lambda x: x[:,:To,...].reshape(-1,*x.shape[2:]))
+            
+            # 观测编码 (GPU运算)
+            if device.type == 'cuda':
+                torch.cuda.synchronize()
+            encoder_start = time.time()
             nobs_features = self.obs_encoder(this_nobs)
+            if device.type == 'cuda':
+                torch.cuda.synchronize()
+            print(f"[TIMING] predict_action.obs_encoder (GPU): {(time.time() - encoder_start) * 1000:.2f}ms")
+            
             # reshape back to B, Do
             global_cond = nobs_features.reshape(B, -1)
             # empty data for action
@@ -208,30 +282,49 @@ class VODP(BasePolicy, PreTrainedModel, ModuleAttrMixin):
         else:
             # condition through impainting
             this_nobs = dict_apply(nobs, lambda x: x[:,:To,...].reshape(-1,*x.shape[2:]))
+            
+            # 观测编码 (GPU运算)
+            if device.type == 'cuda':
+                torch.cuda.synchronize()
+            encoder_start = time.time()
             nobs_features = self.obs_encoder(this_nobs)
+            if device.type == 'cuda':
+                torch.cuda.synchronize()
+            print(f"[TIMING] predict_action.obs_encoder (GPU): {(time.time() - encoder_start) * 1000:.2f}ms")
+            
             # reshape back to B, T, Do
             nobs_features = nobs_features.reshape(B, To, -1)
             cond_data = torch.zeros(size=(B, T, Da+Do), device=device, dtype=dtype)
             cond_mask = torch.zeros_like(cond_data, dtype=torch.bool)
             cond_data[:,:To,Da:] = nobs_features
             cond_mask[:,:To,Da:] = True
+        
+        print(f"[TIMING] predict_action.obs_encode_total: {(time.time() - obs_encode_start) * 1000:.2f}ms")
 
-        # run sampling
+        # run sampling (主要耗时)
+        sampling_start = time.time()
         nsample = self.conditional_sample(
             cond_data, 
             cond_mask,
             local_cond=local_cond,
             global_cond=global_cond,
             **self.kwargs)
+        print(f"[TIMING] predict_action.conditional_sample_total: {(time.time() - sampling_start) * 1000:.2f}ms")
         
         # unnormalize prediction
+        unnormalize_start = time.time()
         naction_pred = nsample[...,:Da]
         action_pred = self.normalizer['action'].unnormalize(naction_pred)
+        print(f"[TIMING] predict_action.unnormalize: {(time.time() - unnormalize_start) * 1000:.2f}ms")
 
         # get action
         start = To - 1
         end = start + self.n_action_steps
         action = action_pred[:,start:end]
+        
+        total_time = time.time() - total_start
+        print(f"[TIMING] predict_action.total: {total_time * 1000:.2f}ms")
+        print(f"[TIMING] predict_action.device: {device}")
         
         result = {
             'action': action,
